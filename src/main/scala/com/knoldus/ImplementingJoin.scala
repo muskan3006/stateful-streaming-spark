@@ -6,13 +6,14 @@ import org.apache.spark.streaming.kafka010.ConsumerStrategies.Subscribe
 import org.apache.spark.streaming.kafka010.KafkaUtils
 import org.apache.spark.streaming.kafka010.LocationStrategies.PreferConsistent
 import org.apache.spark.streaming.{Seconds, State, StateSpec, StreamingContext}
+import play.api.libs.json.Json
 
-object WorkOccurrenceMapWithState {
-
+object ImplementingJoin {
   def main(args: Array[String]) {
-    val conf = new SparkConf().setMaster("local[*]").setAppName("Implementing MapWithState")
+    val conf = new SparkConf().setMaster("local[*]").setAppName("Trial")
     val ssc = new StreamingContext(conf, Seconds(10))
     val interval = 15
+    ssc.checkpoint("_checkpoint")
     val kafkaParams = Map[String, Object](
       "bootstrap.servers" -> "localhost:9092",
       "key.deserializer" -> classOf[StringDeserializer],
@@ -20,26 +21,37 @@ object WorkOccurrenceMapWithState {
       "group.id" -> "spark_mapWithState",
       "auto.offset.reset" -> "latest",
       "enable.auto.commit" -> (false: java.lang.Boolean))
-    val topics = Seq("demo")
+    val topics = Seq("try")
     val kafkaStream = KafkaUtils.createDirectStream[String, String](
       ssc,
       PreferConsistent,
       Subscribe[String, String](topics, kafkaParams))
-    val splits = kafkaStream.map(record => (record.key(), record.value)).flatMap(x => x._2.split(" "))
 
-    val mappingFunc = (word: String, one: Option[Int], state: State[Int]) => {
-      val sum = one.getOrElse(0) + state.getOption.getOrElse(0)
-      state.update(sum)
-      (word, sum)
+    val bookData = kafkaStream.map(record => Json.parse(record.value()).as[Book])
+    val bookRecord = bookData.map(customerData => (customerData.bookId, customerData))
+
+    val mappingFunction = (key: Int, value: Option[Book], state: State[Library]) => {
+      def updateLibrary(newBook: Book): (Int, Library) = {
+        val existingBooks: Seq[Book] =
+          state
+            .getOption()
+            .map(_.books)
+            .getOrElse(Seq[Book]())
+        val updatedLibrary = Library(newBook +: existingBooks)
+        state.update(updatedLibrary)
+        (key, updatedLibrary)
+
+      }
+
+      value.map(book => updateLibrary(book))
     }
 
-    ssc.checkpoint("/home/knoldus/Downloads/hadoop")
-    val wordCounts = splits.map(x => (x, 1)).reduceByKey(_ + _)
-      .mapWithState(StateSpec.function(mappingFunc)).checkpoint(Seconds(interval.toLong))
+    val library = bookRecord
+      .mapWithState(StateSpec.function(mappingFunction))
+      .checkpoint(Seconds(interval.toLong))
 
-    wordCounts.print() //prints the wordcount result of the stream
+    library.print()
     ssc.start()
     ssc.awaitTermination()
   }
-
 }

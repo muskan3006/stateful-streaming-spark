@@ -9,9 +9,9 @@ import org.apache.spark.streaming.{Seconds, StreamingContext}
 
 object WordOccurrenceUpdateStateByKey {
   def main(args: Array[String]) {
-    val conf = new SparkConf().setMaster("local[*]").setAppName("KafkaReceiver")
+    val conf = new SparkConf().setMaster("local[*]").setAppName("Implementing UpdateStateByKey")
     val ssc = new StreamingContext(conf, Seconds(10))
-
+    val interval = 15
     val kafkaParams = Map[String, Object](
       "bootstrap.servers" -> "localhost:9092",
       "key.deserializer" -> classOf[StringDeserializer],
@@ -25,15 +25,17 @@ object WordOccurrenceUpdateStateByKey {
       PreferConsistent,
       Subscribe[String, String](topics, kafkaParams))
     val splits = kafkaStream.map(record => (record.key(), record.value)).flatMap(x => x._2.split(" "))
-        val updateFunc = (values: Seq[Int], state: Option[Int]) => {
-          val currentCount = values.sum
-          val previousCount = state.getOrElse(0)
-          Some(currentCount + previousCount)
-        }
+    val updateFunc = (values: Seq[Int], state: Option[Int]) => {
+      val currentCount = values.sum
+      val previousCount = state.getOrElse(0)
+      Some(currentCount + previousCount)
+    }
 
     //Defining a check point directory for performing stateful operations
     ssc.checkpoint("/home/knoldus/Downloads/hadoop")
-    val wordCounts = splits.map(x => (x, 1)).reduceByKey(_ + _).updateStateByKey(updateFunc)
+    val wordCounts = splits.map(x => (x, 1)).reduceByKey(_ + _)
+      .updateStateByKey(updateFunc).checkpoint(Seconds(interval.toLong))
+
 
     wordCounts.print() //prints the wordcount result of the stream
     ssc.start()
