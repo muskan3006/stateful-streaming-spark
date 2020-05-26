@@ -28,7 +28,7 @@ object ImplementingJoin {
       Subscribe[String, String](topics, kafkaParams))
 
     val bookData = kafkaStream.map(record => Json.parse(record.value()).as[Book])
-    val bookRecord = bookData.map(customerData => (customerData.bookId, customerData))
+    val bookRecord = bookData.map(book => (book.bookId, book))
 
     val mappingFunction = (key: Int, value: Option[Book], state: State[Library]) => {
       def updateLibrary(newBook: Book): (Int, Library) = {
